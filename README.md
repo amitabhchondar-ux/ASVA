@@ -1,68 +1,98 @@
 # ASVA: Advanced Speech and Voice Activation
 
-**Offline voice activation on an ESP32 device, with a full website to monitor, control and evaluate it.**
+> **Edge-Native Offline Voice Activation for ESP32 with Interactive 3D Management Platform**  
+> *Project SIH26172 · Sub-Second Recognition · Zero-Audio Retention · Air-Gapped Local Operation*
 
-ASVA detects a wake word ("Hello ASVA") and a small set of fixed commands ("Light on", "Light off", "Status") directly on the device. No audio ever leaves the board. This repository contains three parts:
-
-| Part | What it is |
-|---|---|
-| `firmware/` | ESP-IDF (C++) code running on the ESP32 board: microphone, wake word, command recognition, LED, Wi-Fi and MQTT |
-| `hub/` | The **ASVA Hub**: a local server (backend + MQTT broker + database) that serves the website |
-| `ml/` | Python and TensorFlow scripts to prepare data and train or evaluate models |
-
-The full product requirements are in [PRD.md](./PRD.md). This README explains what is used, why, and how to build it step by step.
+[![Node.js](https://img.shields.io/badge/Node.js-24%20LTS-green.svg)](https://nodejs.org/)
+[![Fastify](https://img.shields.io/badge/Backend-Fastify-blue.svg)](https://fastify.dev/)
+[![React](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Three.js-orange.svg)](https://threejs.org/)
+[![MQTT](https://img.shields.io/badge/Protocol-MQTT%201883-purple.svg)](https://mqtt.org/)
+[![Privacy](https://img.shields.io/badge/Privacy-Zero--Audio%20Storage-red.svg)](#privacy--zero-audio-architecture)
+[![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
 
 ---
 
-## ⚡ Quick Start (Run from GitHub in 2 Minutes)
+## ⚡ Quick Start (Run in 2 Minutes)
+
+Anyone can clone and run this entire platform locally in **under 2 minutes**—no ESP32 hardware required! A virtual hardware twin is included.
 
 ### Prerequisites
 - **Git**
-- **Node.js 20+ or 24+** (Node.js 24 recommended, includes built-in `node:sqlite` with zero C++ compilation required)
-
-### Option A: Windows (One-Click)
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/amitabhchondar-ux/ASVA.git
-   cd ASVA
-   ```
-2. Run **`setup.bat`** (double-click in File Explorer or run in terminal) to install dependencies and compile the 3D UI.
-3. Run **`start-all.bat`** to launch the Hub Server & Simulator.
-4. Your browser will automatically open **[`http://localhost:8080`](http://localhost:8080)**.
+- **Node.js 20+ or 24+** ([Download Node.js](https://nodejs.org/))
 
 ---
 
-### Option B: Cross-Platform (Mac / Linux / Windows Terminal)
+### 💻 Option 1: Windows (One-Click)
+
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/amitabhchondar-ux/ASVA.git
    cd ASVA
    ```
-2. **Install & Build:**
-   ```bash
-   # 1. Build frontend 3D UI
-   cd hub/web && npm install && npm run build
+2. **Setup:** Double-click **`setup.bat`**  
+   *(Installs all dependencies and builds the 3D UI in ~40 seconds)*
+3. **Launch:** Double-click **`start-all.bat`**  
+   *(Launches the Hub Server + Simulator and automatically opens your browser)*
 
-   # 2. Setup Hub Server
-   cd ../server && npm install && npm run build
+---
 
-   # 3. Setup Virtual ESP32 Simulator
-   cd ../simulator && npm install
-   ```
-3. **Start the Hub Server (Terminal 1):**
+### 🍏 Option 2: Mac / Linux (One-Command)
+
+1. **Clone and setup:**
    ```bash
-   cd hub/server
-   npm start
+   git clone https://github.com/amitabhchondar-ux/ASVA.git
+   cd ASVA
+   chmod +x setup.sh start-all.sh
+   ./setup.sh
    ```
-   *(Starts Fastify, WebSocket link, and embedded MQTT broker on port 1883)*
-4. **Start the Virtual Device Simulator (Terminal 2):**
+2. **Launch:**
    ```bash
-   cd hub/simulator
-   npm run simulate
+   ./start-all.sh
    ```
-   *(Connects over MQTT as an active ESP32 device sending telemetry every 10s)*
-5. **Open Dashboard:**
-   Navigate to **[`http://localhost:8080`](http://localhost:8080)** in Google Chrome or any browser.
+3. Open **[`http://localhost:8080`](http://localhost:8080)** in Google Chrome or any browser.
+
+---
+
+### 📦 Option 3: Standard NPM Commands (Any OS)
+
+```bash
+git clone https://github.com/amitabhchondar-ux/ASVA.git
+cd ASVA
+
+# 1. One-step install & build across all modules
+npm run setup
+
+# 2. In Terminal 1: Start Hub Server & MQTT Broker
+npm start
+
+# 3. In Terminal 2: Start Virtual ESP32 Simulator
+npm run simulate
+```
+
+---
+
+### 🔑 Default Credentials & Network Ports
+- **Dashboard URL:** [`http://localhost:8080`](http://localhost:8080)
+- **Admin Email:** `admin@example.com`
+- **Admin Password:** `admin123`
+- **WebSocket Gateway:** `ws://localhost:8080/ws`
+- **Embedded MQTT Broker:** `localhost:1883`
+
+---
+
+## 📚 Interactive 3D Working Volumes
+
+When you open **[`http://localhost:8080`](http://localhost:8080)**, you will see the **ThreeUI 3D Bookshelf**. Click **Open / Inspect** on any volume to interact with it:
+
+| Volume | Title | Functionality |
+|---|---|---|
+| **I** | **ASVA Live Console** | Real-time device telemetry (Heap, RSSI, Uptime), physical LED switch, and detection sensitivity slider. |
+| **II** | **Event Ledger** | Searchable chronological detection audit log, confidence scores, one-click false-activation flag (`Mark Wrong`), and CSV export. |
+| **III** | **Evaluation Lab** | Session test runner, detection rate %, false alarms/hr, and P95 latency calculations. |
+| **IV** | **Command Matrix** | Actuator controls, pin mappings (GPIO 10 Relay), and command action binding. |
+| **V** | **Virtual ESP32 Twin** | In-browser speech simulation buttons (`Hello ASVA`, `Light on`, `Light off`, `Status`) and raw MQTT wire packet monitor. |
+| **VI** | **Privacy Seal** | Mathematical air-gap proof: 0-byte audio storage, RAM-only circular DMA buffers, and lightweight 142-byte JSON metadata. |
+| **VII** | **Blueprint & Specs** | ESP32-S3 hardware pinout, state machine transitions, and network topology. |
 
 ---
 

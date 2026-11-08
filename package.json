@@ -1,0 +1,25 @@
+{
+  "name": "asva-platform",
+  "version": "1.0.0",
+  "description": "ASVA: Advanced Speech and Voice Activation Platform (SIH26172)",
+  "private": true,
+  "scripts": {
+    "setup": "npm run setup:web && npm run setup:server && npm run setup:sim",
+    "setup:web": "cd hub/web && npm install && npm run build",
+    "setup:server": "cd hub/server && npm install && npm run build",
+    "setup:sim": "cd hub/simulator && npm install",
+    "start": "cd hub/server && npm start",
+    "simulate": "cd hub/simulator && npm run simulate",
+    "build": "cd hub/web && npm run build && cd ../server && npm run build"
+  },
+  "keywords": [
+    "esp32",
+    "voice-activation",
+    "offline-ai",
+    "threejs",
+    "fastify",
+    "mqtt"
+  ],
+  "author": "Amitabh Chondar",
+  "license": "MIT"
+}
