@@ -12,8 +12,9 @@ build/
 *.db
 *.db-journal
 *.db-wal
-hub/server/data/*.db
-hub/server/data/*.db-journal
+*.db-shm
+hub/server/data/*
+!hub/server/data/.gitkeep
 
 # Environment & credentials
 .env
