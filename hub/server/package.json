@@ -1,0 +1,30 @@
+{
+  "name": "asva-hub-server",
+  "version": "1.0.0",
+  "description": "ASVA Hub API server, WebSocket bridge, and MQTT link",
+  "main": "dist/server.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^9.4.0",
+    "@fastify/cors": "^9.0.1",
+    "@fastify/static": "^7.0.4",
+    "@fastify/websocket": "^10.0.1",
+    "aedes": "^0.51.2",
+    "fastify": "^4.28.1",
+    "jsonwebtoken": "^9.0.2",
+    "mqtt": "^5.10.1"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.8",
+    "@types/node": "^22.10.1",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

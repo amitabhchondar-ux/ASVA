@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: asva-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto-data:/mosquitto/data
+
+  hub-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: asva-hub-server
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - HOST=0.0.0.0
+      - MQTT_URL=mqtt://mosquitto:1883
+      - DB_PATH=/app/data/asva.db
+      - ADMIN_EMAIL=admin@example.com
+      - ADMIN_PASSWORD=change-me-now
+      - JWT_SECRET=asva-offline-secure-token-secret-2026
+    volumes:
+      - asva-db-data:/app/data
+
+volumes:
+  mosquitto-data:
+  asva-db-data:
+

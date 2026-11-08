@@ -1,0 +1,19 @@
+{
+  "name": "asva-simulator",
+  "version": "1.0.0",
+  "description": "Virtual ASVA ESP32 Device Simulator",
+  "main": "dist/simulator.js",
+  "scripts": {
+    "build": "tsc",
+    "simulate": "tsx src/simulator.ts"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
+
