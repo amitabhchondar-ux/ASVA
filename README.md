@@ -14,6 +14,58 @@ The full product requirements are in [PRD.md](./PRD.md). This README explains wh
 
 ---
 
+## ⚡ Quick Start (Run from GitHub in 2 Minutes)
+
+### Prerequisites
+- **Git**
+- **Node.js 20+ or 24+** (Node.js 24 recommended, includes built-in `node:sqlite` with zero C++ compilation required)
+
+### Option A: Windows (One-Click)
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/amitabhchondar-ux/ASVA.git
+   cd ASVA
+   ```
+2. Run **`setup.bat`** (double-click in File Explorer or run in terminal) to install dependencies and compile the 3D UI.
+3. Run **`start-all.bat`** to launch the Hub Server & Simulator.
+4. Your browser will automatically open **[`http://localhost:8080`](http://localhost:8080)**.
+
+---
+
+### Option B: Cross-Platform (Mac / Linux / Windows Terminal)
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/amitabhchondar-ux/ASVA.git
+   cd ASVA
+   ```
+2. **Install & Build:**
+   ```bash
+   # 1. Build frontend 3D UI
+   cd hub/web && npm install && npm run build
+
+   # 2. Setup Hub Server
+   cd ../server && npm install && npm run build
+
+   # 3. Setup Virtual ESP32 Simulator
+   cd ../simulator && npm install
+   ```
+3. **Start the Hub Server (Terminal 1):**
+   ```bash
+   cd hub/server
+   npm start
+   ```
+   *(Starts Fastify, WebSocket link, and embedded MQTT broker on port 1883)*
+4. **Start the Virtual Device Simulator (Terminal 2):**
+   ```bash
+   cd hub/simulator
+   npm run simulate
+   ```
+   *(Connects over MQTT as an active ESP32 device sending telemetry every 10s)*
+5. **Open Dashboard:**
+   Navigate to **[`http://localhost:8080`](http://localhost:8080)** in Google Chrome or any browser.
+
+---
+
 ## 1. What the website does
 
 The website is the control and evaluation centre for one or more ASVA devices.
