@@ -96,7 +96,63 @@ When you open **[`http://localhost:8080`](http://localhost:8080)**, you will see
 
 ---
 
-## 1. What the website does
+## 🧩 System Architecture: What Each Component Is & What It Does
+
+To help you and any reviewer understand how the pieces connect, here is a breakdown of every layer in the ASVA platform:
+
+```
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │                           FRONTEND (hub/web)                           │
+  │    React 18 + Vite + Three.js r165 3D Bookshelf Interface              │
+  │    Runs in your web browser at http://localhost:8080                   │
+  │    • Volume I-VII Interactive Panels    • Live Gauges & Controls       │
+  │    • WebSocket Client for live alerts   • REST Client for DB queries   │
+  └───────────────────▲──────────────────────────────────▲─────────────────┘
+                      │ HTTP / REST                      │ WebSocket (ws://)
+                      ▼                                  ▼
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │                         BACKEND HUB (hub/server)                       │
+  │    Fastify + Node.js 24 + Native SQLite Database (node:sqlite)         │
+  │    Runs locally on port 8080                                           │
+  │    • REST Endpoints (/api/devices, /api/events, /api/sessions, /auth)  │
+  │    • WebSocket Hub (/ws) broadcasting live telemetry to all browsers   │
+  │    • Audit Log & Session Aggregator with P95 Latency & False Alarm math│
+  │                                                                        │
+  │    ┌──────────────────────────────────────────────────────────────┐    │
+  │    │            EMBEDDED MQTT BROKER (Aedes, Port 1883)           │    │
+  │    │  IoT communication backbone between Devices and Backend      │    │
+  │    │  • asva/<id>/online   • asva/<id>/status   • asva/<id>/cmd   │    │
+  │    └──────────────────────────────▲───────────────────────────────┘    │
+  └───────────────────────────────────┼────────────────────────────────────┘
+                                      │ MQTT Protocol (Port 1883)
+                                      ▼
+             ┌─────────────────────────────────────────────────┐
+             │                DEVICE LAYER                     │
+             │                                                 │
+             │   Option A: Physical Hardware (firmware/)       │
+             │   • ESP32-S3 Microcontroller + I²S Microphone    │
+             │   • On-device Neural Wake Word (Zero-Audio)     │
+             │   • Physical Relay / LED switch on GPIO 10      │
+             │                                                 │
+             │   Option B: Virtual Twin (hub/simulator/)       │
+             │   • Node.js software emulation of the ESP32     │
+             │   • Allows testing all features without hardware│
+             └─────────────────────────────────────────────────┘
+```
+
+### Component Breakdown Table
+
+| Component | Directory | Technologies Used | What It Is | What It Is Used For |
+|---|---|---|---|---|
+| **1. Frontend** | `hub/web/` | React 18, Vite, Three.js (r165), Tailwind CSS | The visual user interface running inside your browser. | Displays the interactive **3D Bookshelf**, live telemetry dials, toggles physical/virtual LEDs, triggers speech simulations, reviews detection history, flags misrecognitions (`Mark Wrong`), and downloads CSV reports. |
+| **2. Backend Server** | `hub/server/` | Fastify, TypeScript, Node.js 24 | The central API and application server. | Serves the web dashboard, manages user authentication (JWT cookies), runs database queries, validates device command ACKs with 5-second timeouts, and pushes real-time WebSocket events. |
+| **3. Embedded Database** | `hub/server/data/` | Native SQLite (`node:sqlite`) | Lightweight, zero-setup, serverless SQL database stored in a single file (`asva.db`). | Stores persistent records: registered devices, telemetry time-series, historical voice events, evaluation benchmark sessions, and security audit logs with zero external database dependencies. |
+| **4. MQTT Broker** | `hub/server/src/mqtt/` | Aedes (Embedded MQTT) | An ultra-lightweight message broker listening on port `1883`. | The "air traffic controller" for hardware. Devices publish status heartbeats and detection events here; the server publishes actuator commands (`led`, `threshold`) here with instant Last-Will failover detection. |
+| **5. Device Simulator** | `hub/simulator/` | Node.js, TypeScript, MQTT.js | A software-based "hardware twin" that acts exactly like an ESP32. | Enables full end-to-end testing without buying or wiring hardware. Publishes realistic heap memory noise, Wi-Fi RSSI signals, responds to LED commands with ACKs, and simulates voice wake words. |
+| **6. Microcontroller Firmware** | `firmware/` | ESP-IDF 5.x, C++ | Code compiled directly onto the physical ESP32-S3 microcontroller. | Samples raw audio from the I²S MEMS microphone, runs on-chip neural wake-word detection, controls physical relays/LEDs on GPIO 10, and connects to local Wi-Fi and MQTT. **Audio never leaves RAM.** |
+| **7. Machine Learning Pipeline** | `ml/` | Python 3, TensorFlow, TFLite | Offline model training and optimization scripts. | Prepares acoustic datasets, trains Depthwise Separable CNN (DS-CNN) models, and performs INT8 quantization so the model fits in the tight memory of the ESP32 SRAM. |
+
+---
 
 The website is the control and evaluation centre for one or more ASVA devices.
 
