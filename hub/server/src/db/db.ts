@@ -8,11 +8,16 @@ import { config } from '../config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Database directory & file path
-const dbFile = path.resolve(process.cwd(), config.dbPath);
-const dataDir = path.dirname(dbFile);
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+// Database directory & file path — allow ':memory:' for testing / CI
+const dbFile = config.dbPath === ':memory:'
+  ? ':memory:'
+  : path.resolve(process.cwd(), config.dbPath);
+
+if (dbFile !== ':memory:') {
+  const dataDir = path.dirname(dbFile);
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
 }
 
 export const db = new DatabaseSync(dbFile);

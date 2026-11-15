@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
-    "test": "node --test"
+    "test": "tsx --test --test-force-exit test/server.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^9.4.0",
