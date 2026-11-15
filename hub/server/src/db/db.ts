@@ -1,31 +1,53 @@
 import { DatabaseSync } from 'node:sqlite';
-import path from 'path';
-import fs from 'fs';
-import crypto from 'crypto';
-import { fileURLToPath } from 'url';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import argon2 from 'argon2';
+import { config } from '../config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+// Database directory & file path
+const dbFile = path.resolve(process.cwd(), config.dbPath);
+const dataDir = path.dirname(dbFile);
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'asva.db');
-export const db = new DatabaseSync(DB_PATH);
+export const db = new DatabaseSync(dbFile);
 
 // Pragmas
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
 
-export function initDatabase() {
+// OWASP-recommended minimum for argon2id: 19 MiB memory, 2 iterations, 1 lane.
+export const HASH_OPTIONS = {
+  type: argon2.argon2id,
+  memoryCost: 19456, // KiB
+  timeCost: 2,
+  parallelism: 1,
+} as const;
+
+export const hashPassword = (plain: string) => argon2.hash(plain, HASH_OPTIONS);
+
+export function validatePassword(pw: string): string | null {
+  if (pw.length < 12) return 'Password must be at least 12 characters.';
+  if (pw.length > 256) return 'Password is too long.';
+  if (/^(.)\1+$/.test(pw)) return 'Password cannot be a single repeated character.';
+  const common = ['password1234', '123456789012', 'qwertyuiop12', 'admin1234567'];
+  if (common.includes(pw.toLowerCase())) return 'Password is too common.';
+  return null; // OK
+}
+
+export async function initDatabase() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       role TEXT CHECK(role IN ('admin', 'viewer')) NOT NULL DEFAULT 'viewer',
+      must_change_password INTEGER NOT NULL DEFAULT 0,
       active INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL
     );
@@ -35,6 +57,8 @@ export function initDatabase() {
       name TEXT NOT NULL,
       location TEXT DEFAULT 'Lab Bench 1',
       firmware_version TEXT DEFAULT '1.0.0',
+      mqtt_pass_hash TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
       last_seen_at INTEGER NOT NULL,
       online INTEGER NOT NULL DEFAULT 0,
       led_on INTEGER NOT NULL DEFAULT 0,
@@ -100,34 +124,50 @@ export function initDatabase() {
       user_id TEXT,
       device_id TEXT,
       action TEXT NOT NULL,
+      target TEXT,
       detail TEXT,
+      ip TEXT,
+      ok INTEGER NOT NULL DEFAULT 1,
       ts INTEGER NOT NULL
     );
   `);
 
-  // Seed default admin if no users exist
-  const countUsers = db.prepare('SELECT count(*) as count FROM users').get() as { count: number };
-  if (!countUsers || countUsers.count === 0) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com';
-    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
-    const salt = 'asva_salt_2026';
-    const hash = crypto.createHash('sha256').update(adminPassword + salt).digest('hex');
-    
-    db.prepare(`
-      INSERT INTO users (id, email, password_hash, role, active, created_at)
-      VALUES (?, ?, ?, 'admin', 1, ?)
-    `).run('user-admin-01', adminEmail, hash, Math.floor(Date.now() / 1000));
-    console.log(`[DB] Created default admin user: ${adminEmail}`);
-  }
+  // Migrate existing tables if columns are missing
+  try {
+    const userCols = db.prepare('PRAGMA table_info(users)').all() as any[];
+    if (!userCols.some((c) => c.name === 'must_change_password')) {
+      db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+    }
+  } catch {}
+
+  try {
+    const deviceCols = db.prepare('PRAGMA table_info(devices)').all() as any[];
+    if (!deviceCols.some((c) => c.name === 'mqtt_pass_hash')) {
+      db.exec('ALTER TABLE devices ADD COLUMN mqtt_pass_hash TEXT');
+    }
+    if (!deviceCols.some((c) => c.name === 'enabled')) {
+      db.exec('ALTER TABLE devices ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1');
+    }
+  } catch {}
+
+  // Ensure first admin exists with argon2id hash and must_change_password = 1
+  await ensureFirstAdmin();
 
   // Seed sample device if none exists
   const countDevices = db.prepare('SELECT count(*) as count FROM devices').get() as { count: number };
   if (!countDevices || countDevices.count === 0) {
     const now = Math.floor(Date.now() / 1000);
+    const defaultMqttHash = await hashPassword(config.mqttPassword);
+
     db.prepare(`
-      INSERT INTO devices (id, name, location, firmware_version, last_seen_at, online, led_on, threshold, created_at)
-      VALUES (?, ?, ?, ?, ?, 1, 0, 0.80, ?)
-    `).run('asva-esp32-01', 'ASVA Edge Node Alpha', 'Speech Lab Room 4', '1.0.0-IDF5', now, now);
+      INSERT INTO devices (id, name, location, firmware_version, mqtt_pass_hash, enabled, last_seen_at, online, led_on, threshold, created_at)
+      VALUES (?, ?, ?, ?, ?, 1, ?, 1, 0, 0.80, ?)
+    `).run('asva-esp32-01', 'ASVA Edge Node Alpha', 'Speech Lab Room 4', '1.0.0-IDF5', defaultMqttHash, now, now);
+
+    db.prepare(`
+      INSERT INTO devices (id, name, location, firmware_version, mqtt_pass_hash, enabled, last_seen_at, online, led_on, threshold, created_at)
+      VALUES (?, ?, ?, ?, ?, 1, ?, 1, 0, 0.80, ?)
+    `).run('asva-sim-01', 'Virtual Simulator Twin', 'Simulated Environment', '1.0.0-SIM', defaultMqttHash, now, now);
 
     // Insert sample command mappings
     const insertCmd = db.prepare('INSERT INTO commands (id, device_id, phrase, action_type, action_target) VALUES (?, ?, ?, ?, ?)');
@@ -147,7 +187,26 @@ export function initDatabase() {
   }
 }
 
-export function hashPassword(password: string): string {
-  const salt = 'asva_salt_2026';
-  return crypto.createHash('sha256').update(password + salt).digest('hex');
+export async function ensureFirstAdmin() {
+  const row = db.prepare('SELECT count(*) as count FROM users').get() as { count: number };
+  if (row && row.count > 0) return;
+
+  const hash = await hashPassword(config.adminPassword);
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`
+    INSERT INTO users (id, email, password_hash, role, must_change_password, active, created_at)
+    VALUES (?, ?, ?, 'admin', 1, 1, ?)
+  `).run('user-admin-01', config.adminEmail, hash, now);
+
+  console.log(`[DB] Created first admin user: ${config.adminEmail} (password change required at first login).`);
+}
+
+export function runDataRetention() {
+  const retentionSec = config.retentionDays * 86400;
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare('DELETE FROM events WHERE ts < ?').run(now - retentionSec);
+  db.prepare('DELETE FROM audit_log WHERE ts < ?').run(now - 365 * 86400);
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+  } catch {}
 }

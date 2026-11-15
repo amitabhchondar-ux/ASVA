@@ -1,10 +1,48 @@
 import mqtt from 'mqtt';
 import readline from 'readline';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// Parse CLI args: --broker <url> --id <deviceId>
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Auto-load hub/.env if present
+const envCandidates = [
+  resolve(process.cwd(), 'hub', '.env'),
+  resolve(process.cwd(), '.env'),
+  resolve(__dirname, '..', '..', '.env'),
+  resolve(__dirname, '..', '..', 'server', '.env'),
+];
+
+for (const envPath of envCandidates) {
+  if (existsSync(envPath)) {
+    try {
+      if (typeof (process as any).loadEnvFile === 'function') {
+        (process as any).loadEnvFile(envPath);
+      } else {
+        const content = readFileSync(envPath, 'utf8');
+        for (const line of content.split(/\r?\n/)) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+          const eq = trimmed.indexOf('=');
+          if (eq > 0) {
+            const k = trimmed.substring(0, eq).trim();
+            const v = trimmed.substring(eq + 1).trim();
+            if (!(k in process.env)) process.env[k] = v;
+          }
+        }
+      }
+      break;
+    } catch {}
+  }
+}
+
+// Parse CLI args: --broker <url> --id <deviceId> --pass <password>
 const args = process.argv.slice(2);
-let brokerUrl = 'mqtt://127.0.0.1:1883';
+let brokerUrl = process.env.MQTT_URL || 'mqtt://127.0.0.1:1883';
 let deviceId = 'asva-sim-01';
+let mqttPassword = process.env.MQTT_PASSWORD || '';
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--broker' && args[i + 1]) {
@@ -12,6 +50,9 @@ for (let i = 0; i < args.length; i++) {
     i++;
   } else if (args[i] === '--id' && args[i + 1]) {
     deviceId = args[i + 1];
+    i++;
+  } else if (args[i] === '--pass' && args[i + 1]) {
+    mqttPassword = args[i + 1];
     i++;
   }
 }
@@ -35,9 +76,11 @@ const topicEvent = `asva/${deviceId}/event`;
 const topicCmd = `asva/${deviceId}/cmd`;
 const topicAck = `asva/${deviceId}/ack`;
 
-// Connect with Last-Will-and-Testament (LWT)
+// Connect with device credentials and Last-Will-and-Testament (LWT)
 const client = mqtt.connect(brokerUrl, {
-  clientId: `device-${deviceId}`,
+  clientId: deviceId,
+  username: deviceId,
+  password: mqttPassword,
   clean: true,
   will: {
     topic: topicOnline,
@@ -48,7 +91,6 @@ const client = mqtt.connect(brokerUrl, {
 });
 
 function publishStatus() {
-  // Add small realistic noise to telemetry
   heapBytes = Math.max(140000, Math.min(220000, heapBytes + Math.floor((Math.random() - 0.5) * 1200)));
   rssi = Math.max(-85, Math.min(-45, rssi + Math.floor((Math.random() - 0.5) * 3)));
 
@@ -105,6 +147,10 @@ client.on('connect', () => {
   }, 10000);
 
   printHelp();
+});
+
+client.on('error', (err) => {
+  console.warn(`[MQTT] Connection error:`, err.message);
 });
 
 client.on('message', (topic, message) => {
@@ -179,7 +225,7 @@ if (process.stdin.isTTY) {
       emitEvent('command', 'Status');
       publishStatus();
     } else if (key.name === 'f') {
-      emitEvent('wake', 'Hello ASVA', 0.54, 180); // Low confidence false trigger
+      emitEvent('wake', 'Hello ASVA', 0.54, 180);
     } else if (key.name === 'd') {
       console.log('[NETWORK] Simulating power cut / disconnect...');
       client.publish(topicOnline, 'offline', { retain: true, qos: 1 });
@@ -191,4 +237,3 @@ if (process.stdin.isTTY) {
     }
   });
 }
-

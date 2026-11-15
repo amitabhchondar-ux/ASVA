@@ -1,22 +1,77 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { db } from '../db/db.js';
+import { randomBytes } from 'node:crypto';
+import { db, hashPassword } from '../db/db.js';
 import { sendDeviceCommand } from '../mqtt/client.js';
+import { requireRole, audit } from '../auth/guard.js';
+import { config } from '../config.js';
 
 export async function deviceRoutes(fastify: FastifyInstance) {
-  // GET /api/devices
-  fastify.get('/', async () => {
+  // GET /api/devices (admin & viewer)
+  fastify.get('/', {
+    preHandler: requireRole('admin', 'viewer'),
+  }, async () => {
     const devices = db.prepare(`
-      SELECT id, name, location, firmware_version, last_seen_at, online, led_on, threshold, created_at
+      SELECT id, name, location, firmware_version, last_seen_at, online, led_on, threshold, enabled, created_at
       FROM devices
       ORDER BY last_seen_at DESC
     `).all();
     return { devices };
   });
 
-  // GET /api/devices/:id
-  fastify.get('/:id', async (req: FastifyRequest, reply: FastifyReply) => {
+  // POST /api/devices (admin only: create device & generate MQTT credentials)
+  fastify.post('/', {
+    preHandler: requireRole('admin'),
+    schema: {
+      body: {
+        type: 'object',
+        required: ['id'],
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{2,31}$' },
+          name: { type: 'string', maxLength: 64 },
+          location: { type: 'string', maxLength: 64 },
+        },
+      },
+    },
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id, name = '', location = 'Lab Bench' } = req.body as { id: string; name?: string; location?: string };
+    const count = (db.prepare('SELECT COUNT(*) AS n FROM devices').get() as { n: number }).n;
+    if (count >= config.maxDevices) {
+      return reply.code(409).send({ error: 'Device limit reached' });
+    }
+
+    const password = randomBytes(18).toString('base64url'); // 24 chars random password
+    const now = Math.floor(Date.now() / 1000);
+    const passHash = await hashPassword(password);
+
+    try {
+      db.prepare(`
+        INSERT INTO devices (id, name, location, firmware_version, mqtt_pass_hash, enabled, last_seen_at, online, led_on, threshold, created_at)
+        VALUES (?, ?, ?, '1.0.0', ?, 1, ?, 0, 0, 0.80, ?)
+      `).run(id, name || id, location, passHash, now, now);
+    } catch {
+      return reply.code(409).send({ error: 'Device ID already exists' });
+    }
+
+    const userId = (req as any).user?.id || 'admin';
+    audit(userId, 'create-device', id, req.ip, true, `Created device ${id}`);
+
+    // Plaintext password is returned ONCE. Only hash is stored.
+    return reply.code(201).send({
+      id,
+      name: name || id,
+      mqttUsername: id,
+      mqttPassword: password,
+      message: 'Save this MQTT password now - it cannot be recovered from the database.',
+    });
+  });
+
+  // GET /api/devices/:id (admin & viewer)
+  fastify.get('/:id', {
+    preHandler: requireRole('admin', 'viewer'),
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
-    const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(id);
+    const device = db.prepare('SELECT id, name, location, firmware_version, enabled, last_seen_at, online, led_on, threshold, created_at FROM devices WHERE id = ?').get(id);
     if (!device) return reply.status(404).send({ error: 'Device not found' });
 
     const recentTelemetry = db.prepare(`
@@ -32,22 +87,28 @@ export async function deviceRoutes(fastify: FastifyInstance) {
     return { device, recentTelemetry, commands };
   });
 
-  // PATCH /api/devices/:id
-  fastify.patch('/:id', async (req: FastifyRequest, reply: FastifyReply) => {
+  // PATCH /api/devices/:id (admin only)
+  fastify.patch('/:id', {
+    preHandler: requireRole('admin'),
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
-    const { name, location } = req.body as any || {};
+    const { name, location, enabled } = req.body as any || {};
 
     const existing = db.prepare('SELECT id FROM devices WHERE id = ?').get(id);
     if (!existing) return reply.status(404).send({ error: 'Device not found' });
 
     if (name) db.prepare('UPDATE devices SET name = ? WHERE id = ?').run(name, id);
     if (location) db.prepare('UPDATE devices SET location = ? WHERE id = ?').run(location, id);
+    if (enabled !== undefined) db.prepare('UPDATE devices SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, id);
 
+    audit((req as any).user?.id, 'update-device', id, req.ip, true);
     return { success: true };
   });
 
-  // DELETE /api/devices/:id
-  fastify.delete('/:id', async (req: FastifyRequest, reply: FastifyReply) => {
+  // DELETE /api/devices/:id (admin only)
+  fastify.delete('/:id', {
+    preHandler: requireRole('admin'),
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
     const { deleteHistory } = req.query as { deleteHistory?: string };
 
@@ -58,12 +119,14 @@ export async function deviceRoutes(fastify: FastifyInstance) {
     }
 
     db.prepare('DELETE FROM devices WHERE id = ?').run(id);
+    audit((req as any).user?.id, 'delete-device', id, req.ip, true);
     return { success: true };
   });
 
-  // POST /api/devices/:id/commands
-  // Body: { cmd: 'led'|'threshold'|'status', state?: 'on'|'off', value?: number }
-  fastify.post('/:id/commands', async (req: FastifyRequest, reply: FastifyReply) => {
+  // POST /api/devices/:id/commands (admin only)
+  fastify.post('/:id/commands', {
+    preHandler: requireRole('admin'),
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
     const rawBody = req.body as any || {};
     const cmd = rawBody.cmd || rawBody.command || 'unknown';
@@ -84,12 +147,7 @@ export async function deviceRoutes(fastify: FastifyInstance) {
     const cmdId = `c-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
     // Audit log
-    const auditId = `aud-${Date.now()}`;
-    const userId = (req as any).user?.id || 'system';
-    db.prepare(`
-      INSERT INTO audit_log (id, user_id, device_id, action, detail, ts)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(auditId, userId, id, cmd, JSON.stringify(normalizedBody), now);
+    audit((req as any).user?.id || 'admin', 'device-command', id, req.ip, true, JSON.stringify(normalizedBody));
 
     try {
       const ack = await sendDeviceCommand(id, { ...normalizedBody, id: cmdId }, 5000);
@@ -110,8 +168,10 @@ export async function deviceRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // GET /api/devices/:id/telemetry
-  fastify.get('/:id/telemetry', async (req: FastifyRequest) => {
+  // GET /api/devices/:id/telemetry (admin & viewer)
+  fastify.get('/:id/telemetry', {
+    preHandler: requireRole('admin', 'viewer'),
+  }, async (req: FastifyRequest) => {
     const { id } = req.params as { id: string };
     const { from, to, limit } = req.query as { from?: string; to?: string; limit?: string };
 
@@ -134,4 +194,3 @@ export async function deviceRoutes(fastify: FastifyInstance) {
     return { telemetry: items };
   });
 }
-

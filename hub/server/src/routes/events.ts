@@ -1,10 +1,37 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../db/db.js';
 import { broadcastWs } from '../ws/wsHandler.js';
+import { requireRole, audit } from '../auth/guard.js';
+
+// Section 10: Formula injection neutralisation
+export function csvCell(value: unknown): string {
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+  let s = value === null || value === undefined ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; // neutralise spreadsheet formulas
+  if (/[",\r\n]/.test(s)) s = `"${s.replace(/"/g, '""')}"`; // RFC 4180 quotes
+  return s;
+}
 
 export async function eventRoutes(fastify: FastifyInstance) {
-  // GET /api/events
-  fastify.get('/', async (req: FastifyRequest) => {
+  // GET /api/events (admin & viewer)
+  fastify.get('/', {
+    preHandler: requireRole('admin', 'viewer'),
+    schema: {
+      querystring: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          device: { type: 'string', maxLength: 64 },
+          kind: { type: 'string', enum: ['wake', 'command'] },
+          from: { type: 'string' },
+          to: { type: 'string' },
+          minConf: { type: 'string' },
+          page: { type: 'string' },
+          limit: { type: 'string' },
+        },
+      },
+    },
+  }, async (req: FastifyRequest) => {
     const { device, kind, from, to, minConf, page = '1', limit = '50' } = req.query as any;
 
     let whereClause = 'WHERE 1=1';
@@ -52,8 +79,10 @@ export async function eventRoutes(fastify: FastifyInstance) {
     };
   });
 
-  // POST /api/events - Record a new voice detection event (from simulator / API)
-  fastify.post('/', async (req: FastifyRequest, reply: FastifyReply) => {
+  // POST /api/events - Record a new voice detection event (admin & viewer)
+  fastify.post('/', {
+    preHandler: requireRole('admin', 'viewer'),
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const body = req.body as any || {};
     const targetDevId = body.deviceId || body.device_id || 'asva-esp32-01';
     const eventId = `evt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -94,8 +123,10 @@ export async function eventRoutes(fastify: FastifyInstance) {
     return reply.status(201).send({ success: true, event: createdEvent });
   });
 
-  // PATCH /api/events/:id - Mark wrong / undo
-  fastify.patch('/:id', async (req: FastifyRequest, reply: FastifyReply) => {
+  // PATCH /api/events/:id - Mark wrong / undo (admin & viewer)
+  fastify.patch('/:id', {
+    preHandler: requireRole('admin', 'viewer'),
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
     const { wrong } = req.body as any || {};
 
@@ -104,6 +135,8 @@ export async function eventRoutes(fastify: FastifyInstance) {
 
     const newWrong = wrong !== undefined ? (wrong ? 1 : 0) : (event.wrong ? 0 : 1);
     db.prepare('UPDATE events SET wrong = ? WHERE id = ?').run(newWrong, id);
+
+    audit((req as any).user?.id, 'flag-event', id, req.ip, true, `Flagged wrong: ${Boolean(newWrong)}`);
 
     broadcastWs({
       type: 'event.updated',
@@ -114,8 +147,10 @@ export async function eventRoutes(fastify: FastifyInstance) {
     return { success: true, id, wrong: Boolean(newWrong) };
   });
 
-  // GET /api/events/export.csv
-  fastify.get('/export.csv', async (req: FastifyRequest, reply: FastifyReply) => {
+  // GET /api/events/export.csv (admin & viewer)
+  fastify.get('/export.csv', {
+    preHandler: requireRole('admin', 'viewer'),
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const { device, kind, minConf } = req.query as any;
 
     let whereClause = 'WHERE 1=1';
@@ -138,18 +173,29 @@ export async function eventRoutes(fastify: FastifyInstance) {
       FROM events
       ${whereClause}
       ORDER BY ts DESC
+      LIMIT 50000
     `).all(...params) as any[];
 
-    let csv = 'id,device_id,session_id,kind,text,confidence,latency_ms,wrong,timestamp,iso_time\n';
-    for (const e of events) {
-      const iso = new Date(e.ts * 1000).toISOString();
-      const safeText = `"${e.text.replace(/"/g, '""')}"`;
-      csv += `${e.id},${e.device_id},${e.session_id || ''},${e.kind},${safeText},${e.confidence},${e.latency_ms},${e.wrong ? 'true' : 'false'},${e.ts},${iso}\n`;
-    }
+    const header = ['id', 'device_id', 'session_id', 'kind', 'text', 'confidence', 'latency_ms', 'wrong', 'timestamp', 'iso_time'].join(',');
+    const lines = events.map((e: any) => [
+      csvCell(e.id),
+      csvCell(e.device_id),
+      csvCell(e.session_id || ''),
+      csvCell(e.kind),
+      csvCell(e.text),
+      csvCell(e.confidence),
+      csvCell(e.latency_ms),
+      csvCell(e.wrong ? 'true' : 'false'),
+      csvCell(e.ts),
+      csvCell(new Date(e.ts * 1000).toISOString()),
+    ].join(','));
 
-    reply.header('Content-Type', 'text/csv');
-    reply.header('Content-Disposition', 'attachment; filename="asva-events-export.csv"');
-    return reply.send(csv);
+    audit((req as any).user?.id, 'export-csv', null, req.ip, true, `Exported ${events.length} rows`);
+
+    reply
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header('Content-Disposition', 'attachment; filename="asva-events.csv"')
+      .header('Cache-Control', 'no-store')
+      .send('\uFEFF' + [header, ...lines].join('\r\n')); // BOM ensures Excel renders UTF-8 correctly
   });
 }
-

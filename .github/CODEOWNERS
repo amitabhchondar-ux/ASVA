@@ -1,0 +1,15 @@
+# Each line is a file pattern followed by one or more owners.
+# The last matching pattern wins. Owners are asked to review matching pull requests.
+
+*                     @amitabhchondar-ux
+/firmware/            @amitabhchondar-ux
+/hub/server/          @amitabhchondar-ux
+/hub/web/             @amitabhchondar-ux
+/ml/                  @amitabhchondar-ux
+/docs/                @amitabhchondar-ux
+
+# Security-sensitive files always need the owner's review
+/SECURITY.md          @amitabhchondar-ux
+/.github/             @amitabhchondar-ux
+/scripts/             @amitabhchondar-ux
+/hub/.env.example     @amitabhchondar-ux

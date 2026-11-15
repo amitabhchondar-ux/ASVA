@@ -1,0 +1,84 @@
+name: Bug report
+description: Something is broken or behaves differently from the documentation
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+        **Security problems must not be reported here.** Use the private link in the issue chooser.
+        **Remove passwords, tokens and Wi-Fi details from anything you paste.**
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - hub/server (API, MQTT broker, database)
+        - hub/web (website / 3D UI)
+        - hub/simulator (virtual ESP32)
+        - firmware (ESP32-S3)
+        - ml (training / evaluation)
+        - documentation
+        - not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse --short HEAD` or the release version
+      placeholder: "e.g. a1b2c3d or v0.2.0"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node version (`node --version`), browser and version, ESP-IDF version, board and microphone
+      placeholder: |
+        OS: Windows 11
+        Node: v24.x
+        Browser: Chrome 130
+        Hardware: ESP32-S3 N16R8 + INMP441 (or "simulator")
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: The last ~30 lines of the server log, browser console, or serial monitor. Remove secrets first.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and found no duplicate
+          required: true
+        - label: I removed passwords, tokens and personal information from this report
+          required: true
+        - label: This is not a security vulnerability
+          required: true

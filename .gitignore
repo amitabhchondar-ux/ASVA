@@ -52,3 +52,59 @@ ENV/
 *.h5
 *.tflite
 models/*.bin
+
+# Security additions from pack
+# ---- Append these lines to your existing .gitignore -------------------------
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+hub/.env
+hub/.env.*
+!hub/.env.example
+*.pem
+*.key
+*.crt
+
+# Database and runtime data (events, telemetry, audit log)
+hub/server/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ESP-IDF: sdkconfig stores your Wi-Fi + MQTT passwords in plain text
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/build/
+firmware/managed_components/
+
+# Node
+node_modules/
+dist/
+build/
+coverage/
+*.log
+npm-debug.log*
+
+# Python / ML
+ml/.venv/
+**/__pycache__/
+*.pyc
+ml/data/raw/
+ml/data/processed/
+ml/runs/
+
+# Network captures made during privacy verification (contain LAN details)
+*.pcap
+*.pcapng
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+

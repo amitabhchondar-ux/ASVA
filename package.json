@@ -4,7 +4,8 @@
   "description": "ASVA: Advanced Speech and Voice Activation Platform (SIH26172)",
   "private": true,
   "scripts": {
-    "setup": "npm run setup:web && npm run setup:server && npm run setup:sim",
+    "bootstrap": "node scripts/bootstrap-env.mjs",
+    "setup": "npm run setup:web && npm run setup:server && npm run setup:sim && npm run bootstrap",
     "setup:web": "cd hub/web && npm install && npm run build",
     "setup:server": "cd hub/server && npm install && npm run build",
     "setup:sim": "cd hub/simulator && npm install",

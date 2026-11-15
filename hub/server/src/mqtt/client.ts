@@ -1,7 +1,7 @@
 import mqtt, { MqttClient } from 'mqtt';
 import { db } from '../db/db.js';
 import { broadcastWs } from '../ws/wsHandler.js';
-import crypto from 'crypto';
+import { config } from '../config.js';
 
 export let mqttClient: MqttClient;
 
@@ -12,10 +12,15 @@ const pendingCommands = new Map<string, {
   timer: NodeJS.Timeout;
 }>();
 
-export function initMqttClient(brokerUrl = process.env.MQTT_URL || 'mqtt://127.0.0.1:1883') {
+// Fixed vocabulary allowed for events (Privacy & Security defense)
+const ALLOWED_TEXT = new Set(['Hello ASVA', 'Light on', 'Light off', 'Status']);
+
+export function initMqttClient(brokerUrl = process.env.MQTT_URL || `mqtt://${config.mqttHost === '0.0.0.0' ? '127.0.0.1' : config.mqttHost}:${config.mqttPort}`) {
   console.log(`[MQTT Client] Connecting to broker at ${brokerUrl}...`);
   mqttClient = mqtt.connect(brokerUrl, {
-    clientId: `asva-hub-server-${Math.random().toString(16).substring(2, 8)}`,
+    clientId: `asva-hub-internal-${Math.random().toString(16).substring(2, 8)}`,
+    username: config.mqttUsername,
+    password: config.mqttPassword,
     clean: true,
     reconnectPeriod: 2000,
   });
@@ -100,13 +105,22 @@ export function initMqttClient(brokerUrl = process.env.MQTT_URL || 'mqtt://127.0
         });
       } else if (subTopic === 'event') {
         const data = JSON.parse(payloadStr);
-        // {"kind":"wake"|"command","text":"...","conf":0.93,"latency_ms":110,"ts":1767225600}
+        // Validate strictly according to Section 8
+        const kind = data.kind === 'wake' ? 'wake' : (data.kind === 'command' ? 'command' : null);
+        if (!kind) return;
+
+        let text = typeof data.text === 'string' ? data.text.trim() : '';
+        // If not in allowed vocabulary, drop or normalize
+        if (!ALLOWED_TEXT.has(text)) {
+          console.warn(`[MQTT] Dropping event with unallowed text: ${text}`);
+          return;
+        }
+
+        const conf = typeof data.conf === 'number' && data.conf >= 0 && data.conf <= 1 ? data.conf : 0.90;
+        const latency = typeof data.latency_ms === 'number' && data.latency_ms >= 0 && data.latency_ms <= 60000 ? data.latency_ms : 120;
+        const eventTs = typeof data.ts === 'number' ? data.ts : now;
+
         const eventId = `evt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-        const kind = data.kind === 'wake' ? 'wake' : 'command';
-        const text = data.text || (kind === 'wake' ? 'Hello ASVA' : 'Light on');
-        const conf = typeof data.conf === 'number' ? data.conf : 0.90;
-        const latency = typeof data.latency_ms === 'number' ? data.latency_ms : 120;
-        const eventTs = data.ts || now;
 
         // Check if an active session exists for this device
         const activeSession = db.prepare(`
@@ -189,4 +203,3 @@ export function sendDeviceCommand(deviceId: string, commandObj: any, timeoutMs =
     });
   });
 }
-

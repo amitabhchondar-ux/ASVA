@@ -28,3 +28,4 @@ echo "===================================================="
 trap "kill $SERVER_PID $SIM_PID 2>/dev/null; exit" SIGINT SIGTERM
 
 wait
+

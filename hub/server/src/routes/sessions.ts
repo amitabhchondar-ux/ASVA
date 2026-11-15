@@ -1,9 +1,13 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../db/db.js';
+import { requireRole, audit } from '../auth/guard.js';
+import { csvCell } from './events.js';
 
 export async function sessionRoutes(fastify: FastifyInstance) {
-  // GET /api/sessions
-  fastify.get('/', async () => {
+  // GET /api/sessions (admin & viewer)
+  fastify.get('/', {
+    preHandler: requireRole('admin', 'viewer'),
+  }, async () => {
     const sessions = db.prepare(`
       SELECT s.*, 
         (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id) as event_count
@@ -13,13 +17,26 @@ export async function sessionRoutes(fastify: FastifyInstance) {
     return { sessions };
   });
 
-  // POST /api/sessions - Start session
-  fastify.post('/', async (req: FastifyRequest, reply: FastifyReply) => {
+  // POST /api/sessions - Start session (admin only)
+  fastify.post('/', {
+    preHandler: requireRole('admin'),
+    schema: {
+      body: {
+        type: 'object',
+        required: ['name', 'device_id'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 100 },
+          device_id: { type: 'string', maxLength: 64 },
+          speaker: { type: 'string', maxLength: 64 },
+          distance_m: { type: 'number', minimum: 0, maximum: 20 },
+          noise_level: { type: 'string', maxLength: 64 },
+          attempts: { type: 'integer', minimum: 0, maximum: 10000 },
+          notes: { type: 'string', maxLength: 1000 },
+        },
+      },
+    },
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const { name, device_id, speaker, distance_m, noise_level, attempts, notes } = req.body as any || {};
-
-    if (!name || !device_id) {
-      return reply.status(400).send({ error: 'Session name and device_id are required' });
-    }
 
     const sessionId = `ses-${Date.now()}`;
     const now = Math.floor(Date.now() / 1000);
@@ -39,12 +56,15 @@ export async function sessionRoutes(fastify: FastifyInstance) {
       now
     );
 
+    audit((req as any).user?.id, 'start-session', sessionId, req.ip, true, `Session ${name}`);
     const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
     return { success: true, session };
   });
 
-  // PATCH /api/sessions/:id - Update session
-  fastify.patch('/:id', async (req: FastifyRequest, reply: FastifyReply) => {
+  // PATCH /api/sessions/:id - Update session (admin only)
+  fastify.patch('/:id', {
+    preHandler: requireRole('admin'),
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
     const { attempts, notes, name, speaker, distance_m, noise_level } = req.body as any || {};
 
@@ -58,11 +78,14 @@ export async function sessionRoutes(fastify: FastifyInstance) {
     if (distance_m !== undefined) db.prepare('UPDATE sessions SET distance_m = ? WHERE id = ?').run(Number(distance_m), id);
     if (noise_level) db.prepare('UPDATE sessions SET noise_level = ? WHERE id = ?').run(noise_level, id);
 
+    audit((req as any).user?.id, 'update-session', id, req.ip, true);
     return { success: true };
   });
 
-  // POST /api/sessions/:id/stop - End session
-  fastify.post('/:id/stop', async (req: FastifyRequest, reply: FastifyReply) => {
+  // POST /api/sessions/:id/stop - End session (admin only)
+  fastify.post('/:id/stop', {
+    preHandler: requireRole('admin'),
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
     const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as any;
     if (!session) return reply.status(404).send({ error: 'Session not found' });
@@ -70,11 +93,14 @@ export async function sessionRoutes(fastify: FastifyInstance) {
     const now = Math.floor(Date.now() / 1000);
     db.prepare('UPDATE sessions SET ended_at = ? WHERE id = ?').run(now, id);
 
+    audit((req as any).user?.id, 'stop-session', id, req.ip, true);
     return { success: true, ended_at: now };
   });
 
-  // GET /api/sessions/:id/summary - Calculated SIH metrics
-  fastify.get('/:id/summary', async (req: FastifyRequest, reply: FastifyReply) => {
+  // GET /api/sessions/:id/summary - Calculated SIH metrics (admin & viewer)
+  fastify.get('/:id/summary', {
+    preHandler: requireRole('admin', 'viewer'),
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
     const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as any;
     if (!session) return reply.status(404).send({ error: 'Session not found' });
@@ -169,33 +195,47 @@ export async function sessionRoutes(fastify: FastifyInstance) {
     };
   });
 
-  // GET /api/sessions/:id/export.csv
-  fastify.get('/:id/export.csv', async (req: FastifyRequest, reply: FastifyReply) => {
+  // GET /api/sessions/:id/export.csv (admin & viewer)
+  fastify.get('/:id/export.csv', {
+    preHandler: requireRole('admin', 'viewer'),
+  }, async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
     const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as any;
     if (!session) return reply.status(404).send({ error: 'Session not found' });
 
     const events = db.prepare('SELECT * FROM events WHERE session_id = ? ORDER BY ts ASC').all(id) as any[];
 
-    let csv = `# ASVA Session Evaluation Report\n`;
-    csv += `# Session ID: ${session.id}\n`;
-    csv += `# Session Name: "${session.name.replace(/"/g, '""')}"\n`;
-    csv += `# Device: ${session.device_id}\n`;
-    csv += `# Speaker: ${session.speaker}\n`;
-    csv += `# Distance: ${session.distance_m}m\n`;
-    csv += `# Noise Level: ${session.noise_level}\n`;
-    csv += `# Attempts: ${session.attempts}\n`;
-    csv += `# Started: ${new Date(session.started_at * 1000).toISOString()}\n`;
-    csv += `# Ended: ${session.ended_at ? new Date(session.ended_at * 1000).toISOString() : 'Running'}\n\n`;
+    const lines = [
+      `# ASVA Session Evaluation Report`,
+      `# Session ID: ${csvCell(session.id)}`,
+      `# Session Name: ${csvCell(session.name)}`,
+      `# Device: ${csvCell(session.device_id)}`,
+      `# Speaker: ${csvCell(session.speaker)}`,
+      `# Distance: ${csvCell(session.distance_m)}m`,
+      `# Noise Level: ${csvCell(session.noise_level)}`,
+      `# Attempts: ${csvCell(session.attempts)}`,
+      `# Started: ${new Date(session.started_at * 1000).toISOString()}`,
+      `# Ended: ${session.ended_at ? new Date(session.ended_at * 1000).toISOString() : 'Running'}`,
+      '',
+      ['id', 'kind', 'text', 'confidence', 'latency_ms', 'wrong', 'timestamp', 'iso_time'].join(','),
+      ...events.map((e: any) => [
+        csvCell(e.id),
+        csvCell(e.kind),
+        csvCell(e.text),
+        csvCell(e.confidence),
+        csvCell(e.latency_ms),
+        csvCell(e.wrong ? 'true' : 'false'),
+        csvCell(e.ts),
+        csvCell(new Date(e.ts * 1000).toISOString()),
+      ].join(',')),
+    ];
 
-    csv += 'id,kind,text,confidence,latency_ms,wrong,timestamp\n';
-    for (const e of events) {
-      csv += `${e.id},${e.kind},"${e.text.replace(/"/g, '""')}",${e.confidence},${e.latency_ms},${e.wrong ? '1' : '0'},${e.ts}\n`;
-    }
+    audit((req as any).user?.id, 'export-session-csv', id, req.ip, true);
 
-    reply.header('Content-Type', 'text/csv');
-    reply.header('Content-Disposition', `attachment; filename="asva-session-${session.id}.csv"`);
-    return reply.send(csv);
+    reply
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="asva-session-${session.id}.csv"`)
+      .header('Cache-Control', 'no-store')
+      .send('\uFEFF' + lines.join('\r\n'));
   });
 }
-

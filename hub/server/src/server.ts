@@ -1,14 +1,17 @@
 import Fastify from 'fastify';
+import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
+import jwt from '@fastify/jwt';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
-import jwt from 'jsonwebtoken';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-import { initDatabase } from './db/db.js';
+import { config } from './config.js';
+import { db, initDatabase, runDataRetention } from './db/db.js';
 import { startEmbeddedBroker } from './mqtt/broker.js';
 import { initMqttClient } from './mqtt/client.js';
 import { registerWsClient, broadcastWs } from './ws/wsHandler.js';
@@ -17,32 +20,11 @@ import { deviceRoutes } from './routes/devices.js';
 import { eventRoutes } from './routes/events.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { userRoutes } from './routes/users.js';
-import { db } from './db/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = parseInt(process.env.PORT || '8080', 10);
-const HOST = process.env.HOST || '0.0.0.0';
-const JWT_SECRET = process.env.JWT_SECRET || 'asva-super-secret-hub-jwt-key-2026';
 const OFFLINE_TIMEOUT_SECONDS = 30;
-
-function authenticate(request: any, reply: any) {
-  const token = request.cookies?.asva_token;
-  if (!token) {
-    return reply.code(401).send({ error: 'Authentication required' });
-  }
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
-    const user = db.prepare('SELECT id, email, role, active FROM users WHERE id = ?').get(decoded.id) as any;
-    if (!user || user.active === 0) {
-      return reply.code(401).send({ error: 'User not found or inactive' });
-    }
-    request.user = user;
-  } catch {
-    return reply.code(401).send({ error: 'Invalid or expired token' });
-  }
-}
 
 async function markOfflineDevices() {
   const now = Math.floor(Date.now() / 1000);
@@ -63,54 +45,134 @@ async function markOfflineDevices() {
 }
 
 async function main() {
-  initDatabase();
+  // 1. Initialise database (schema, migrations, first admin)
+  await initDatabase();
 
-  await startEmbeddedBroker(1883);
+  // 2. Start embedded MQTT broker with per-device authentication & ACL
+  await startEmbeddedBroker(config.mqttPort);
 
+  // 3. Connect hub's internal MQTT client
   initMqttClient();
 
+  // 4. Build Fastify application with security plugins
   const fastify = Fastify({
+    bodyLimit: 64 * 1024, // 64 KB limit
+    trustProxy: false,
     logger: {
-      level: process.env.LOG_LEVEL || 'info',
+      level: config.logLevel,
+      redact: {
+        paths: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'res.headers["set-cookie"]',
+          'req.body.password',
+          'req.body.currentPassword',
+          'req.body.newPassword',
+          'req.body.mqttPassword',
+        ],
+        censor: '[redacted]',
+      },
     },
   });
 
+  // Helmet Security Headers
+  await fastify.register(helmet, {
+    strictTransportSecurity: config.cookieSecure,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        connectSrc: ["'self'", 'ws:', 'wss:', 'http:', 'https:'],
+        workerSrc: ["'self'", 'blob:'],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  });
+
+  // CORS - Exact origin matching
   await fastify.register(cors, {
-    origin: true,
+    origin: config.corsOrigins,
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   });
 
-  await fastify.register(cookie, {
-    secret: JWT_SECRET,
+  // Global Rate Limiting
+  await fastify.register(rateLimit, {
+    global: true,
+    max: config.apiRateMax,
+    timeWindow: config.apiRateWindow,
   });
 
-  await fastify.register(fastifyWebsocket);
+  // Cookie Plugin
+  await fastify.register(cookie);
 
-  fastify.addHook('onRequest', async (request: any, reply: any) => {
-    const url = request.routerPath || request.url || '';
-    // Only enforce authentication on /api/ endpoints (except /api/auth and /health)
-    if (!url.startsWith('/api/')) return;
-    if (url.startsWith('/api/auth') || url === '/api/health') return;
-    authenticate(request, reply);
+  // JWT Plugin
+  await fastify.register(jwt, {
+    secret: config.jwtSecret,
+    cookie: { cookieName: 'asva_session', signed: false },
+    sign: { algorithm: 'HS256', expiresIn: config.jwtExpiresIn },
+    verify: { algorithms: ['HS256'] },
   });
 
+  // WebSocket Plugin
+  await fastify.register(fastifyWebsocket, {
+    options: { maxPayload: 4 * 1024 }, // 4 KB max incoming frame
+  });
+
+  // CSRF Defense in depth for state-changing requests
+  fastify.addHook('onRequest', async (req, reply) => {
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+      const origin = req.headers.origin;
+      if (origin && !config.corsOrigins.includes(origin)) {
+        return reply.code(403).send({ error: 'Origin not allowed' });
+      }
+    }
+  });
+
+  // Generic error handler to prevent internal stack leak
+  fastify.setErrorHandler((err: any, req, reply) => {
+    req.log.error({ err }, 'Request failed');
+    const status = err.statusCode && err.statusCode < 500 ? err.statusCode : 500;
+    reply.code(status).send({ error: status === 500 ? 'Internal server error' : err.message });
+  });
+
+  // WebSocket live feed endpoint
   fastify.get('/ws', { websocket: true }, (connection: any, req: any) => {
     const socket = connection.socket || connection;
-    // Allow WebSocket streaming for dashboard telemetry and live alerts
-    registerWsClient(socket);
+    const origin = req.headers.origin;
+    if (origin && !config.corsOrigins.includes(origin)) {
+      socket.close(1008, 'Origin not allowed');
+      return;
+    }
+
+    // Inspect session cookie
+    let user: any = undefined;
+    const token = req.cookies?.asva_session || req.cookies?.asva_token;
+    if (token) {
+      try {
+        const decoded = (fastify as any).jwt.verify(token);
+        const userId = decoded.sub || decoded.id;
+        user = db.prepare('SELECT id, email, role FROM users WHERE id = ? AND active = 1').get(userId);
+      } catch {}
+    }
+
+    registerWsClient(socket, user);
   });
 
+  // Register API Routes
   await fastify.register(authRoutes, { prefix: '/api/auth' });
   await fastify.register(deviceRoutes, { prefix: '/api/devices' });
   await fastify.register(eventRoutes, { prefix: '/api/events' });
   await fastify.register(sessionRoutes, { prefix: '/api/sessions' });
   await fastify.register(userRoutes, { prefix: '/api/users' });
 
-  const landingPagesDir = path.join(__dirname, '..', '..', 'web', 'public', 'landing-pages');
-  if (!fs.existsSync(landingPagesDir)) {
-    fs.mkdirSync(landingPagesDir, { recursive: true });
-  }
-
+  // Serve static UI assets
   const webDistDir = path.join(__dirname, '..', '..', 'web', 'dist');
   if (fs.existsSync(webDistDir)) {
     await fastify.register(fastifyStatic, {
@@ -127,18 +189,22 @@ async function main() {
     }
   }
 
+  // Health check endpoint
   fastify.get('/health', async () => {
     return { status: 'healthy', timestamp: Math.floor(Date.now() / 1000) };
   });
 
+  // Background Timers: device offline monitoring & data retention
   setInterval(markOfflineDevices, 5000);
+  setInterval(runDataRetention, 24 * 3600 * 1000);
 
+  // Start HTTP and WebSocket server
   try {
-    await fastify.listen({ port: PORT, host: HOST });
+    await fastify.listen({ port: config.port, host: config.host });
     console.log(`\n======================================================`);
-    console.log(`  ASVA Hub Server running on http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
-    console.log(`  WebSocket live link: ws://localhost:${PORT}/ws`);
-    console.log(`  MQTT Broker listening on port 1883`);
+    console.log(`  ASVA Hub Server running on http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`);
+    console.log(`  WebSocket live link: ws://localhost:${config.port}/ws`);
+    console.log(`  MQTT Broker listening on ${config.mqttHost}:${config.mqttPort} (authenticated)`);
     console.log(`======================================================\n`);
   } catch (err) {
     fastify.log.error(err);

@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "description": "Virtual ASVA ESP32 Device Simulator",
   "main": "dist/simulator.js",
+  "type": "module",
   "scripts": {
     "build": "tsc",
-    "simulate": "tsx src/simulator.ts"
+    "simulate": "node dist/simulator.js",
+    "dev": "tsx src/simulator.ts"
   },
   "dependencies": {
     "mqtt": "^5.10.1"
@@ -16,4 +18,3 @@
     "typescript": "^5.7.2"
   }
 }
-

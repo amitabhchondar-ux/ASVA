@@ -1,0 +1,48 @@
+# Keeps dependencies and GitHub Actions up to date by opening pull requests.
+# NOTE: Dependabot reports an error for a directory that has no manifest.
+# Delete any block below whose folder or manifest (package.json / requirements.txt) does not exist.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+
+  - package-ecosystem: "npm"
+    directory: "/hub/server"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "server"]
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+
+  - package-ecosystem: "npm"
+    directory: "/hub/web"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "web"]
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+
+  - package-ecosystem: "npm"
+    directory: "/hub/simulator"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "simulator"]
+
+  - package-ecosystem: "pip"
+    directory: "/ml"
+    schedule: { interval: "monthly" }
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "ml"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule: { interval: "weekly", day: "monday" }
+    labels: ["dependencies", "ci"]
