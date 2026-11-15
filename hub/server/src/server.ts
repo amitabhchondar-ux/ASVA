@@ -81,15 +81,16 @@ async function main() {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'blob:'],
-        connectSrc: ["'self'", 'ws:', 'wss:', 'http:', 'https:'],
-        workerSrc: ["'self'", 'blob:'],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+        imgSrc: ["'self'", "data:", "blob:", "https://ublctyddhtbgaersvxxb.supabase.co"],
+        connectSrc: ["'self'", "ws:", "wss:", "http:", "https:"],
+        workerSrc: ["'self'", "blob:"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         formAction: ["'self'"],
-        frameAncestors: ["'none'"],
+        frameAncestors: ["'self'"],
       },
     },
     crossOriginEmbedderPolicy: false,
@@ -192,6 +193,11 @@ async function main() {
   // Health check endpoint
   fastify.get('/health', async () => {
     return { status: 'healthy', timestamp: Math.floor(Date.now() / 1000) };
+  });
+
+  // Direct 3D shelf dashboard redirect
+  fastify.get('/shelf', async (req, reply) => {
+    return reply.redirect('/landing-pages/complete-shelf-v2.html');
   });
 
   // Background Timers: device offline monitoring & data retention
