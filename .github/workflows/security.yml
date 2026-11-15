@@ -73,7 +73,7 @@ jobs:
         dir: [hub/server, hub/web, hub/simulator]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: ${{ hashFiles(format('{0}/package-lock.json', matrix.dir)) != '' }}
         with:
           node-version: "24"
