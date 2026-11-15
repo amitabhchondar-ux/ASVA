@@ -119,7 +119,7 @@ A virtual ESP32 is included, so you can run the whole platform on your computer 
 | Git | any recent | `git --version` |
 | Node.js | **24 LTS** (needs the built-in `node:sqlite` module) | `node --version` |
 
-> **TODO (verify):** make sure `engines.node` in `package.json` matches what you state here. `node:sqlite` is only available in recent Node releases, so "Node 20" will not work if you rely on it.
+> **Note:** `node:sqlite` is built into Node.js 24+ only. Node 20 or earlier will not work.
 
 ### Quick Command Reference
 
@@ -129,7 +129,7 @@ A virtual ESP32 is included, so you can run the whole platform on your computer 
 | **Start Everything** | Double-click `start-all.bat` | `./start-all.sh` | `npm start` & `npm run simulate` |
 | **Stop Everything** | Double-click `stop-all.bat` | `./stop-all.sh` (or Ctrl+C) | `Ctrl+C` in both terminals |
 | **Open Dashboard** | `http://localhost:8080` (or `http://localhost:8080/shelf`) | `http://localhost:8080` | `http://localhost:8080` |
-| **Login Credentials** | `admin@example.com` / `admin123` (or `.env` password) | Same | Same |
+| **Login Credentials** | `admin@example.com` / password printed during setup | Same | Same |
 
 ### Option 1: Windows (One-Click)
 
