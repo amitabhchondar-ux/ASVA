@@ -121,42 +121,51 @@ A virtual ESP32 is included, so you can run the whole platform on your computer 
 
 > **TODO (verify):** make sure `engines.node` in `package.json` matches what you state here. `node:sqlite` is only available in recent Node releases, so "Node 20" will not work if you rely on it.
 
-### Option 1: Windows (one-click)
+### Quick Command Reference
+
+| Action | Windows | macOS / Linux | Terminal (Manual) |
+|---|---|---|---|
+| **One-time Setup** | Double-click `setup.bat` | `./setup.sh` | `npm run setup` |
+| **Start Everything** | Double-click `start-all.bat` | `./start-all.sh` | `npm start` & `npm run simulate` |
+| **Stop Everything** | Double-click `stop-all.bat` | `./stop-all.sh` (or Ctrl+C) | `Ctrl+C` in both terminals |
+| **Open Dashboard** | `http://localhost:8080` (or `http://localhost:8080/shelf`) | `http://localhost:8080` | `http://localhost:8080` |
+| **Login Credentials** | `admin@example.com` / `admin123` (or `.env` password) | Same | Same |
+
+### Option 1: Windows (One-Click)
 
 ```bash
 git clone https://github.com/amitabhchondar-ux/ASVA.git
 cd ASVA
 ```
-1. Double-click **`setup.bat`**. It installs dependencies, builds the 3D UI and creates `hub/.env` with random secrets.
-2. **Read the console**: it prints your admin password **once**. Save it.
-3. Double-click **`start-all.bat`**. It starts the hub and the simulator and opens your browser.
-4. To stop everything, double-click **`stop-all.bat`**.
+1. **First-time setup:** Double-click **`setup.bat`**. It installs all dependencies, builds the 3D UI, and creates `hub/.env` with security secrets.
+2. **Start the platform:** Double-click **`start-all.bat`**. This starts both the Hub Server and Virtual ESP32 Simulator, and automatically opens <http://localhost:8080> in your browser.
+3. **Stop the platform:** Double-click **`stop-all.bat`**. It cleanly shuts down all server and simulator processes and frees the ports.
 
 ### Option 2: macOS / Linux
 
 ```bash
 git clone https://github.com/amitabhchondar-ux/ASVA.git
 cd ASVA
-chmod +x setup.sh start-all.sh
-./setup.sh          # installs, builds, creates hub/.env, prints admin password once
+chmod +x setup.sh start-all.sh stop-all.sh
+./setup.sh          # 1-time setup: installs, builds, creates hub/.env
 ./start-all.sh      # starts hub + simulator
 ```
-Open <http://localhost:8080> in Chrome, Edge or Firefox.
+Open <http://localhost:8080> in your browser. To stop, run `./stop-all.sh` or press `Ctrl+C`.
 
-### Option 3: plain npm (any OS)
+### Option 3: Terminal (Any OS)
 
 ```bash
 git clone https://github.com/amitabhchondar-ux/ASVA.git
 cd ASVA
 npm run setup       # one-step install + build for all modules
-npm run bootstrap   # creates hub/.env with random secrets (prints admin password once)
 
 # Terminal 1: hub server + MQTT broker
 npm start
 
-# Terminal 2: virtual ESP32
+# Terminal 2: virtual ESP32 simulator
 npm run simulate
 ```
+To stop, press `Ctrl+C` in Terminal 1 and Terminal 2.
 
 ### First login
 

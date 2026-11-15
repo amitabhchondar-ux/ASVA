@@ -15,13 +15,18 @@ start "ASVA ESP32 Simulator" cmd /k "cd /d %~dp0hub\simulator && npm run simulat
 
 echo.
 echo ================================================================
-echo   SUCCESS! The platform is running on PORT 8080
+echo   SUCCESS! ASVA is running!
 echo.
-echo   Local Web Dashboard URL:
+echo   Web Dashboard URLs:
 echo   --> http://localhost:8080
-echo   --> http://127.0.0.1:8080
+echo   --> http://localhost:8080/shelf
 echo.
-echo   Opening dashboard in your default browser now...
+echo   Login Credentials:
+echo   --> Email:    admin@example.com
+echo   --> Password: admin123 (or password from hub/.env)
+echo.
+echo   To STOP everything cleanly:
+echo   --> Double-click stop-all.bat
 echo ================================================================
 echo.
 
