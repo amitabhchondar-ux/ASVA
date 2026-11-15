@@ -189,16 +189,23 @@ export async function initDatabase() {
 
 export async function ensureFirstAdmin() {
   const row = db.prepare('SELECT count(*) as count FROM users').get() as { count: number };
-  if (row && row.count > 0) return;
+  if (!row || row.count === 0) {
+    const hash = await hashPassword(config.adminPassword);
+    const now = Math.floor(Date.now() / 1000);
+    db.prepare(`
+      INSERT INTO users (id, email, password_hash, role, must_change_password, active, created_at)
+      VALUES (?, ?, ?, 'admin', 1, 1, ?)
+    `).run('user-admin-01', config.adminEmail, hash, now);
 
-  const hash = await hashPassword(config.adminPassword);
-  const now = Math.floor(Date.now() / 1000);
-  db.prepare(`
-    INSERT INTO users (id, email, password_hash, role, must_change_password, active, created_at)
-    VALUES (?, ?, ?, 'admin', 1, 1, ?)
-  `).run('user-admin-01', config.adminEmail, hash, now);
-
-  console.log(`[DB] Created first admin user: ${config.adminEmail} (password change required at first login).`);
+    console.log(`[DB] Created first admin user: ${config.adminEmail} (password change required at first login).`);
+  } else {
+    const admin = db.prepare('SELECT id, password_hash FROM users WHERE email = ?').get(config.adminEmail) as any;
+    if (admin && !admin.password_hash.startsWith('$argon2')) {
+      const hash = await hashPassword(config.adminPassword);
+      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, admin.id);
+      console.log(`[DB] Upgraded admin user password hash to argon2id.`);
+    }
+  }
 }
 
 export function runDataRetention() {

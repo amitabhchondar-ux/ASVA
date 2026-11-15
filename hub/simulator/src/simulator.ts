@@ -34,7 +34,7 @@ for (const envPath of envCandidates) {
         }
       }
       break;
-    } catch {}
+    } catch { }
   }
 }
 

@@ -45,7 +45,7 @@ export function registerWsClient(socket: WebSocket, user?: WsUser) {
       if (msg.type === 'ping') {
         socket.send(JSON.stringify({ type: 'pong', ts: Math.floor(Date.now() / 1000) }));
       }
-    } catch {}
+    } catch { }
   });
 }
 
