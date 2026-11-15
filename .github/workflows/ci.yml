@@ -117,7 +117,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: ${{ hashFiles('ml/requirements.txt') != '' }}
         with:
           python-version: "3.11"
